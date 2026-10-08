@@ -6,6 +6,8 @@ HYPHANET_DATA=${HYPHANET_DATA:-/data}
 
 SOCAT_LISTEN_PORT=8123
 HYPHANET_FPROXY_PORT=8888
+# How long to wait for the node's FProxy port to come up (seconds).
+STARTUP_TIMEOUT=${STARTUP_TIMEOUT:-120}
 
 echo "--- Entrypoint Start ---"
 echo "DEBUG: Current User: $(whoami)"
@@ -117,11 +119,25 @@ if [ "$1" = 'start' ]; then
     done
 
     if [ -n "$found_script" ]; then
+        # The Tanuki wrapper (backend.type=PIPE) names its FIFOs after its own PID
+        # (/tmp/wrapper-<pid>-1-in|-out). Container PIDs are reused across restarts,
+        # so leftovers from an unclean shutdown make the next start fail with
+        # "Unable to create backend pipe: File exists" and the node never comes up.
+        echo "Removing stale wrapper runtime pipes..."
+        rm -f "${TMPDIR:-/tmp}"/wrapper-*-in "${TMPDIR:-/tmp}"/wrapper-*-out
+
         echo "Attempting to start Hyphanet in background using: $found_script"        
         "$found_script" start
 
-        echo "Waiting for Hyphanet to start and listen on port ${HYPHANET_FPROXY_PORT}..."
-        sleep 15 
+        echo "Waiting for Hyphanet to start and listen on port ${HYPHANET_FPROXY_PORT} (timeout: ${STARTUP_TIMEOUT}s)..."
+        waited=0
+        while [ "${waited}" -lt "${STARTUP_TIMEOUT}" ]; do
+            if netstat -tuln | grep -qE "(127\.0\.0\.1|0\.0\.0\.0):${HYPHANET_FPROXY_PORT}"; then
+                break
+            fi
+            sleep 2
+            waited=$((waited + 2))
+        done
         
         if netstat -tuln | grep -q "127.0.0.1:${HYPHANET_FPROXY_PORT}"; then
              echo "Hyphanet detected listening on 127.0.0.1:${HYPHANET_FPROXY_PORT}, starting SOCAT proxy..."
@@ -162,7 +178,7 @@ if [ "$1" = 'start' ]; then
 
         else
              echo "-------------------------------------------------------------"
-             echo "ERROR: Hyphanet wasn't detected listening on port ${HYPHANET_FPROXY_PORT} after 15 seconds."
+             echo "ERROR: Hyphanet wasn't detected listening on port ${HYPHANET_FPROXY_PORT} within ${STARTUP_TIMEOUT} seconds."
              echo "Check current ports in usage:"
              netstat -tuln
              echo "Cannot start SOCAT proxy."
