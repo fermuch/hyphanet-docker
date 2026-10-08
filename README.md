@@ -1,7 +1,7 @@
 # Hyphanet Docker Container
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/poullorca/hyphanet-node)](https://hub.docker.com/r/poullorca/hyphanet-node)
-![GitHub License](https://img.shields.io/github/license/PoulLorca/hyphanet-docker)
+[![Build and publish image](https://github.com/fermuch/hyphanet-docker/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/fermuch/hyphanet-docker/actions/workflows/docker-publish.yml)
+![GitHub License](https://img.shields.io/github/license/fermuch/hyphanet-docker)
 
 Secure containerized deployment of Hyphanet (Freenet fork) with automatic configuration and data isolation.
 
@@ -29,8 +29,21 @@ docker run -d \
   --name hyphanet \
   -p 8123:8123 \
   -v hyphanet_data:/data \
-  poullorca/hyphanet-node:v0.15.04
+  ghcr.io/fermuch/hyphanet-docker:latest
 ```
+
+### Available Tags
+Images are published to GitHub Container Registry by the [`Build and publish image`](.github/workflows/docker-publish.yml) workflow on every push to `main` and on `v*` tags:
+
+| Tag                 | Meaning                                          |
+|---------------------|--------------------------------------------------|
+| `latest`            | Latest build from `main`                         |
+| `build0NNNNN`       | Pinned to a Hyphanet build (e.g. `build01507`)   |
+| `sha-<short-sha>`   | Pinned to a commit                               |
+| `X.Y.Z`             | Created from a `vX.Y.Z` git tag                  |
+
+> [!NOTE]
+> New GHCR packages are **private by default**. To allow anonymous pulls, set the package visibility to public in the repository's *Packages* settings.
 
 ### Accessing Hyphanet
 1. Wait 2-3 minutes for initial setup
@@ -67,14 +80,17 @@ This project is provided as-is. The maintainer:
 
 ## Development
 ```bash
-# Build image
+# Build image (Hyphanet version is defined by ARG HYPHANET_VERSION in the Dockerfile)
 docker build -t hyphanet-node .
+
+# Build a specific Hyphanet build
+docker build --build-arg HYPHANET_VERSION=1507 -t hyphanet-node .
 
 # Test locally
 docker run -it --rm -p 8123:8123 hyphanet-node
 
 # Contributing
-PRs welcome at https://github.com/PoulLorca/hyphanet-docker
+PRs welcome at https://github.com/fermuch/hyphanet-docker
 ```
 
 ## Support

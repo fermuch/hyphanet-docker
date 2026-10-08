@@ -1,21 +1,21 @@
+ARG HYPHANET_VERSION=1507
+
 FROM eclipse-temurin:21.0.7_6-jre-jammy AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \    
-    wget \
-    curl \
-    ca-certificates \
-    unzip \
-    expect \
-    dnsutils \
-    && rm -rf /var/lib/apt/lists/*
-
-ARG HYPHANET_VERSION=1503
-ENV HYPHANET_INSTALLER_URL=https://www.draketo.de/dateien/freenet/build0${HYPHANET_VERSION}/new_installer_offline_${HYPHANET_VERSION}.jar
+ARG HYPHANET_VERSION
+# Primary mirror: official GitHub release asset; fallback: draketo.de mirror.
+ENV HYPHANET_INSTALLER_URLS="https://github.com/hyphanet/fred/releases/download/build0${HYPHANET_VERSION}/new_installer_offline_${HYPHANET_VERSION}.jar https://www.draketo.de/dateien/freenet/build0${HYPHANET_VERSION}/new_installer_offline_${HYPHANET_VERSION}.jar"
 ENV INSTALLER_JAR=new_installer_offline.jar
 ENV HYPHANET_HOME=/opt/hyphanet
 ENV INSTALL_USER=installer
 ENV INSTALL_UID=1001
 ENV INSTALL_GID=1001
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    expect \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid ${INSTALL_GID} ${INSTALL_USER} && \
     useradd --uid ${INSTALL_UID} --gid ${INSTALL_GID} --shell /bin/bash --create-home ${INSTALL_USER}
@@ -25,14 +25,20 @@ RUN mkdir -p ${HYPHANET_HOME} && chown ${INSTALL_UID}:${INSTALL_GID} ${HYPHANET_
 USER ${INSTALL_USER}
 WORKDIR /home/${INSTALL_USER}
 
-# Test DNS resolution and try multiple download methods
-RUN echo "Testing DNS resolution..." && \
-    nslookup www.draketo.de || echo "nslookup failed, trying with dig..." && \
-    dig www.draketo.de || echo "dig failed, continuing..." && \
-    echo "Attempting download with wget..." && \
-    (wget --progress=bar:force:noscroll --tries=3 --timeout=30 --dns-timeout=10 -O ${INSTALLER_JAR} "${HYPHANET_INSTALLER_URL}" || \
-     echo "wget failed, trying with curl..." && \
-     curl -L --connect-timeout 30 --max-time 300 --retry 3 -o ${INSTALLER_JAR} "${HYPHANET_INSTALLER_URL}")
+# Download the offline installer JAR, trying each mirror in HYPHANET_INSTALLER_URLS.
+RUN set -eux; \
+    for url in ${HYPHANET_INSTALLER_URLS}; do \
+        echo "Downloading installer from ${url}"; \
+        if curl -fsSL --connect-timeout 30 --max-time 600 --retry 3 --retry-delay 5 -o "${INSTALLER_JAR}" "${url}"; then \
+            echo "Downloaded ${INSTALLER_JAR}"; \
+            break; \
+        fi; \
+        echo "WARN: download failed from ${url}"; \
+    done; \
+    if [ ! -s "${INSTALLER_JAR}" ]; then \
+        echo "ERROR: could not download installer for build 0${HYPHANET_VERSION}"; \
+        exit 1; \
+    fi
 
 COPY --chmod=755 <<'EOT' install_script.exp
 #!/usr/bin/expect -f
@@ -75,14 +81,17 @@ EOT
 
 RUN ./install_script.exp
 
-RUN echo "DEBUG BUILD: Content of ${HYPHANET_HOME} after install:" && \
-    ls -lRa ${HYPHANET_HOME} || echo "DEBUG BUILD: Failed to list ${HYPHANET_HOME}" && \
-    echo "DEBUG BUILD: Searching for .sh files in ${HYPHANET_HOME}..." && \
-    find ${HYPHANET_HOME} -type f -name "*.sh" 2>/dev/null | sort || echo "DEBUG BUILD: No .sh files found"
+# Sanity-check that the installer produced a usable node layout.
+RUN test -f ${HYPHANET_HOME}/run.sh && test -f ${HYPHANET_HOME}/freenet.ini
 
 
 FROM eclipse-temurin:21.0.7_6-jre-jammy
 
+ARG HYPHANET_VERSION
+LABEL org.opencontainers.image.title="hyphanet-docker" \
+      org.opencontainers.image.version="0.7.5.${HYPHANET_VERSION}"
+
+ENV HYPHANET_VERSION=${HYPHANET_VERSION}
 ENV HYPHANET_USER=hyphanet
 ENV HYPHANET_UID=1000
 ENV HYPHANET_GID=1000
