@@ -33,7 +33,7 @@ docker run -d \
 ```
 
 ### Available Tags
-Images are published to GitHub Container Registry by the [`Build and publish image`](.github/workflows/docker-publish.yml) workflow on every push to `main` and on `v*` tags:
+Images are published to GitHub Container Registry by the [`Build and publish image`](.github/workflows/docker-publish.yml) workflow on every push to `main` and on `v*` tags, for `linux/amd64` and `linux/arm64`:
 
 | Tag                 | Meaning                                          |
 |---------------------|--------------------------------------------------|
