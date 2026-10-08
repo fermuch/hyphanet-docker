@@ -62,6 +62,26 @@ for item in "${PERSISTENT_ITEMS[@]}"; do
         mkdir -p "$(dirname "${dest_path}")"
         mv "${src_path}" "${dest_path}"
     fi
+    # Hyphanet rewrites freenet.ini as a NEW regular file on save (tmp+rename),
+    # replacing the symlink created below. So when both copies exist and the
+    # ${HYPHANET_HOME} one is a real file, it holds the node's latest config:
+    # promote it to ${HYPHANET_DATA} instead of deleting it. The
+    # "<item>.image-default" snapshot (baked at image build time) marks the
+    # untouched template so a fresh container from a newer image cannot
+    # overwrite a configured copy with the template.
+    if [ -f "${src_path}" ] && [ ! -L "${src_path}" ] && [ -e "${dest_path}" ]; then
+        default_snapshot="${src_path}.image-default"
+        promote=no
+        if [ -f "${default_snapshot}" ]; then
+            cmp -s "${src_path}" "${default_snapshot}" || promote=yes
+        elif [ "${src_path}" -nt "${dest_path}" ]; then
+            promote=yes
+        fi
+        if [ "${promote}" = yes ]; then
+            echo "Promoting newer ${item} from ${HYPHANET_HOME} to ${HYPHANET_DATA}"
+            mv -f "${src_path}" "${dest_path}"
+        fi
+    fi
     if [ -e "${dest_path}" ]; then
         rm -rf "${src_path}"
         ln -sf "${dest_path}" "${src_path}"
@@ -132,23 +152,33 @@ if [ "$1" = 'start' ]; then
         echo "Waiting for Hyphanet to start and listen on port ${HYPHANET_FPROXY_PORT} (timeout: ${STARTUP_TIMEOUT}s)..."
         waited=0
         while [ "${waited}" -lt "${STARTUP_TIMEOUT}" ]; do
-            if netstat -tuln | grep -qE "(127\.0\.0\.1|0\.0\.0\.0):${HYPHANET_FPROXY_PORT}"; then
+            if netstat -tuln | grep -qE ":${HYPHANET_FPROXY_PORT}([^0-9]|$)"; then
                 break
             fi
             sleep 2
             waited=$((waited + 2))
         done
         
-        if netstat -tuln | grep -q "127.0.0.1:${HYPHANET_FPROXY_PORT}"; then
-             echo "Hyphanet detected listening on 127.0.0.1:${HYPHANET_FPROXY_PORT}, starting SOCAT proxy..."
+        # netstat renders binds as '127.0.0.1:8888', '0.0.0.0:8888', ':::8888'
+        # (IPv6 wildcard) or '::1:8888'; match any of them.
+        if netstat -tuln | grep -qE ":${HYPHANET_FPROXY_PORT}([^0-9]|$)"; then
+             echo "Hyphanet detected listening on port ${HYPHANET_FPROXY_PORT}, starting SOCAT proxy..."
 
-             
-             echo "Starting socat to redirect 0.0.0.0:${SOCAT_LISTEN_PORT} -> 127.0.0.1:${HYPHANET_FPROXY_PORT}"
-             socat TCP-LISTEN:${SOCAT_LISTEN_PORT},fork,reuseaddr,bind=0.0.0.0 TCP:127.0.0.1:${HYPHANET_FPROXY_PORT} &
+             # Pick a loopback target that actually accepts connections (covers
+             # 127.0.0.1, dual-stack ::: and v6-only ::1 binds).
+             SOCAT_V4_TARGET=""
+             for cand in "127.0.0.1" "[::1]"; do
+                 if timeout 3 socat -u /dev/null "TCP:${cand}:${HYPHANET_FPROXY_PORT}" 2>/dev/null; then
+                     SOCAT_V4_TARGET="$cand"
+                     break
+                 fi
+             done
+             echo "Starting socat to redirect 0.0.0.0:${SOCAT_LISTEN_PORT} -> ${SOCAT_V4_TARGET:-127.0.0.1}:${HYPHANET_FPROXY_PORT}"
+             socat TCP-LISTEN:${SOCAT_LISTEN_PORT},fork,reuseaddr,bind=0.0.0.0 TCP:${SOCAT_V4_TARGET:-127.0.0.1}:${HYPHANET_FPROXY_PORT} &
              SOCAT_PID=$!
              echo "Proxy SOCAT IPv4 started with PID: $SOCAT_PID"
              
-             if netstat -tuln | grep -q "::1:${HYPHANET_FPROXY_PORT}"; then
+             if netstat -tuln | grep -qE "(:::${HYPHANET_FPROXY_PORT}|::1:${HYPHANET_FPROXY_PORT})"; then
                  echo "Hyphanet detected listening on ::1:${HYPHANET_FPROXY_PORT}, starting SOCAT IPv6 proxy..."                 
                  echo "Starting socat to redirect [::]:${SOCAT_LISTEN_PORT} -> [::1]:${HYPHANET_FPROXY_PORT}"
                  socat TCP-LISTEN:${SOCAT_LISTEN_PORT},fork,reuseaddr,bind=:: TCP:[::1]:${HYPHANET_FPROXY_PORT} &
@@ -191,8 +221,37 @@ if [ "$1" = 'start' ]; then
             echo "WARN: Log file $WRAPPER_LOG_PATH not found. Creating empty file."
             touch "$WRAPPER_LOG_PATH"
         fi         
+        # docker stop/restart/reboot only signals PID 1: bash defers traps while a
+        # foreground command (tail) runs, so the node was always SIGKILLed after
+        # the grace period and could not save freenet.ini on shutdown. Run tail in
+        # the background so the trap fires instead: stop the node gracefully and
+        # copy its freshly saved config into ${HYPHANET_DATA}.
+        save_config_to_data() {
+            for item in "freenet.ini" "freenet.ini.bak" "node.random"; do
+                src="${HYPHANET_HOME}/${item}"
+                dest="${HYPHANET_DATA}/${item}"
+                if [ -f "${src}" ] && [ ! -L "${src}" ]; then
+                    cp -f "${src}" "${dest}" 2>/dev/null || true
+                fi
+            done
+        }
+        on_stop() {
+            echo "Received stop signal: stopping Hyphanet gracefully..."
+            timeout 6 "$found_script" stop >/dev/null 2>&1 || true
+            for i in 1 2 3; do
+                pgrep -f "freenet.node.NodeStarter" >/dev/null 2>&1 || break
+                sleep 1
+            done
+            save_config_to_data
+            echo "Hyphanet stopped; config persisted to ${HYPHANET_DATA}."
+            exit 0
+        }
+        trap on_stop TERM INT
+
         sleep 5
-        tail -f "$WRAPPER_LOG_PATH"
+        tail -f "$WRAPPER_LOG_PATH" &
+        TAIL_PID=$!
+        wait "$TAIL_PID"
     else
         echo "-------------------------------------------------------------"
         echo "ERROR: Could not find a valid and executable start script!"

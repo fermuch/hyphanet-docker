@@ -109,6 +109,11 @@ RUN groupadd --gid ${HYPHANET_GID} ${HYPHANET_USER} && \
 
 COPY --from=builder --chown=${HYPHANET_UID}:${HYPHANET_GID} ${HYPHANET_HOME} ${HYPHANET_HOME}
 
+# Snapshot the installer's pristine freenet.ini so the entrypoint can tell it
+# apart from a node-written config (see the promotion logic in entrypoint.sh).
+RUN cp -p ${HYPHANET_HOME}/freenet.ini ${HYPHANET_HOME}/freenet.ini.image-default && \
+    chown ${HYPHANET_UID}:${HYPHANET_GID} ${HYPHANET_HOME}/freenet.ini.image-default
+
 RUN mkdir -p ${HYPHANET_DATA} && \
   chown ${HYPHANET_UID}:${HYPHANET_GID} ${HYPHANET_DATA}
 
