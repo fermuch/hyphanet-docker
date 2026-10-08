@@ -62,6 +62,8 @@ docker volume ls
 docker exec -it hyphanet ls /data
 ```
 
+This includes `freenet.ini` (node configuration, wizard completion), `master.keys`, and the node datastore (`/data/datastore`, sized via `node.storeSize` in `freenet.ini`).
+
 ## Security Notes
 - 🔐 FProxy bound to container network only by default
 - 🛡️ All sensitive files stored in isolated volume

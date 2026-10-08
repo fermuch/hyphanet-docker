@@ -50,11 +50,22 @@ PERSISTENT_ITEMS=(
     "downloads" 
     "plugins"
     "stats" 
-    "store" 
     "wrapper.log"
 )
 echo "Setting up persistence links..."
 mkdir -p "${HYPHANET_DATA}"
+# The node creates ./datastore lazily, i.e. after this script has run, and it
+# can grow to tens of GiB, so the loop below never sees it on a fresh
+# container: create and link it up front instead. A real directory in its
+# place was written by an entrypoint that had no datastore handling; moving it
+# onto the volume would copy it across the overlay mount (it is a cache, not
+# user data), so drop it with a warning and let the node rebuild it.
+if [ -d "${HYPHANET_HOME}/datastore" ] && [ ! -L "${HYPHANET_HOME}/datastore" ]; then
+    echo "WARN: removing in-container datastore at ${HYPHANET_HOME}/datastore (written by an older image); the node will rebuild it in ${HYPHANET_DATA}"
+    rm -rf "${HYPHANET_HOME}/datastore"
+fi
+mkdir -p "${HYPHANET_DATA}/datastore"
+ln -sfn "${HYPHANET_DATA}/datastore" "${HYPHANET_HOME}/datastore"
 for item in "${PERSISTENT_ITEMS[@]}"; do
     src_path="${HYPHANET_HOME}/${item}"
     dest_path="${HYPHANET_DATA}/${item}"
