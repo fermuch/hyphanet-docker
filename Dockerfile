@@ -1,6 +1,6 @@
 ARG HYPHANET_VERSION=1507
 
-FROM eclipse-temurin:21.0.13.1_2-jre-jammy AS builder
+FROM ubuntu:24.04 AS builder
 
 ARG HYPHANET_VERSION
 # Primary mirror: official GitHub release asset; fallback: draketo.de mirror.
@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     expect \
+    openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid ${INSTALL_GID} ${INSTALL_USER} && \
@@ -85,7 +86,7 @@ RUN ./install_script.exp
 RUN test -f ${HYPHANET_HOME}/run.sh && test -f ${HYPHANET_HOME}/freenet.ini
 
 
-FROM eclipse-temurin:21.0.13.1_2-jre-jammy
+FROM ubuntu:24.04
 
 ARG HYPHANET_VERSION
 LABEL org.opencontainers.image.title="hyphanet-docker" \
@@ -105,10 +106,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \
     iproute2 \
     socat \
+    openjdk-21-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd --gid ${HYPHANET_GID} ${HYPHANET_USER} && \
-    useradd --uid ${HYPHANET_UID} --gid ${HYPHANET_GID} --shell /bin/bash --create-home ${HYPHANET_USER}
+# Ubuntu 24.04 already reserves UID/GID 1000 for ubuntu; rename that account
+# so existing volumes keep their ownership.
+RUN groupmod --new-name ${HYPHANET_USER} ubuntu && \
+    usermod --login ${HYPHANET_USER} --home /home/${HYPHANET_USER} --move-home --shell /bin/bash ubuntu
 
 COPY --from=builder --chown=${HYPHANET_UID}:${HYPHANET_GID} ${HYPHANET_HOME} ${HYPHANET_HOME}
 
