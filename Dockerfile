@@ -1,6 +1,6 @@
 ARG HYPHANET_VERSION=1507
 
-FROM eclipse-temurin:21.0.7_6-jre-jammy AS builder
+FROM eclipse-temurin:21.0.13.1_2-jre-jammy AS builder
 
 ARG HYPHANET_VERSION
 # Primary mirror: official GitHub release asset; fallback: draketo.de mirror.
@@ -85,7 +85,7 @@ RUN ./install_script.exp
 RUN test -f ${HYPHANET_HOME}/run.sh && test -f ${HYPHANET_HOME}/freenet.ini
 
 
-FROM eclipse-temurin:21.0.7_6-jre-jammy
+FROM eclipse-temurin:21.0.13.1_2-jre-jammy
 
 ARG HYPHANET_VERSION
 LABEL org.opencontainers.image.title="hyphanet-docker" \
@@ -97,6 +97,9 @@ ENV HYPHANET_UID=1000
 ENV HYPHANET_GID=1000
 ENV HYPHANET_HOME=/opt/hyphanet
 ENV HYPHANET_DATA=/data
+# CVE-2026-114938: fixed in this Java release; keep the mitigation as
+# defense in depth for the wrapper-started JVM on every supported architecture.
+ENV JAVA_TOOL_OPTIONS="-XX:-UseBASE64Intrinsics"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     net-tools \

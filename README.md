@@ -69,6 +69,7 @@ This includes `freenet.ini` (node configuration, wizard completion), `master.key
 - 🛡️ All sensitive files stored in isolated volume
 - 📜 Automatic log rotation
 - ⚠️ Never expose port 8123 publicly without authentication
+- ☕ Java 21.0.13.1, with Base64 intrinsics disabled as defense in depth for CVE-2026-114938
 
 ## Disclaimer
 This project is provided as-is. The maintainer:
